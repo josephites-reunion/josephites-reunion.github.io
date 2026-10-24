@@ -103,6 +103,7 @@ body.locked{overflow:hidden}
 .vbar .tr{flex-grow:1;height:22px;border-radius:6px;background:#EEF0F3;overflow:hidden}
 .vbar .tr>span{display:block;height:100%;background:var(--teal)}
 .empty{text-align:center;color:var(--sub);padding:28px 8px;font-size:14px}
+.zhead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin:14px 2px 0;padding-bottom:6px;border-bottom:2px solid var(--line2);font-weight:700;font-size:16px;color:var(--text)}.zhead:first-child{margin-top:0}.zhead .muted{font-weight:500;font-size:12px}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media (max-width:420px){.stats .n{font-size:20px}}
 .bnav{display:none}
@@ -344,7 +345,7 @@ function viewMembers(){
     '<div class="row between wrapf" style="font-size:12px;color:#4B5563"><span>Paid <b class="mono" style="color:var(--text)">'+inr(paid)+'</b></span>'+(isAdmin()?'<span>Confirmed <b class="mono" style="color:var(--teal)">'+inr(rec)+'</b></span>':'')+'</div></section>';
   if(isAdmin())h+='<label class="search">'+IC.search+'<span class="sr">Search</span><input id="q" data-act="query" value="'+esc(S.query)+'" placeholder="Search a classmate" autocomplete="off"></label>';
   var tabs=[['all','All',ppl.length]].concat(ORDER.map(function(k){return [k,ST[k].t,cnt[k]];}));
-  var zoneView=S.me.role==='zone_leader'||(isAdmin()&&S.zone!=='all');
+  var zoneView=S.me.role==='zone_leader'||isAdmin();
   if(zoneView)S.status='all';
   else h+='<div class="chips" role="group" aria-label="Filter by status">'+tabs.map(function(t){return '<button class="chip'+(S.status===t[0]?' on':'')+'" data-act="status" data-v="'+t[0]+'">'+t[1]+' · '+t[2]+'</button>';}).join('')+'</div>';
   if(false){
@@ -365,22 +366,33 @@ function viewMembers(){
   return h;
 }
 function membersBody(ppl){
-  var zoneView=S.me.role==='zone_leader'||(isAdmin()&&S.zone!=='all');
+  var zoneView=S.me.role==='zone_leader'||isAdmin();
   if(!zoneView||(S.query||'').trim())return listHtml(ppl);
+  if(isAdmin()&&S.zone==='all')return groupedAllHtml(ppl);
   return groupedHtml(ppl,S.me.role==='zone_leader'?S.me.zone_id:Number(S.zone));
 }
-function groupedHtml(ppl,zid){
+function groupedAllHtml(ppl){
+  var h='';
+  S.zones.forEach(function(z){var zp=ppl.filter(function(p){return p.zone_id===z.id;});if(!zp.length)return;
+    var g=zp.filter(function(p){return p.status==='green';}).length;
+    h+='<div class="zhead" role="heading" aria-level="2"><span>'+esc(z.name)+'</span><span class="muted">'+zp.length+(zp.length===1?' person':' people')+' · '+g+' Green</span></div>'+groupedHtml(zp,z.id,true);});
+  return h||'<div class="empty">No classmates yet.</div>';
+}
+function groupedHtml(ppl,zid,tagZone){
   zid=zid||S.me.zone_id;var open=S.openGroups||(S.openGroups={});
-  var gls=groupLeadersInZone(zid),used={},blocks=[];
+  var gls=groupLeadersInZone(zid),used={},blocks=[],solo=[],zt=tagZone?' · '+zoneName(zid):'';
   function byName(a,b){return a.name.localeCompare(b.name);}
   gls.forEach(function(g){var lp=personById(g.pid);
     var mem=ppl.filter(function(p){return p.group_leader_id===g.pid&&!isLeader(p.id);}).sort(byName);
     var all=(lp?[lp]:[]).concat(mem);all.forEach(function(p){used[p.id]=1;});
-    blocks.push({key:String(g.pid),name:g.name,sub:(g.role==='zone_leader'?'Regional coordinator':'Zone coordinator')+' · '+mem.length+(mem.length===1?' member':' members'),people:all,lead:true,role:g.role});});
+    // a regional coordinator with no classmates allotted: no group card, just their own row
+    if(g.role==='zone_leader'&&!mem.length){if(lp)solo.push(lp);return;}
+    blocks.push({key:String(g.pid),name:g.name,sub:(g.role==='zone_leader'?'Regional coordinator':'Zone coordinator')+zt+' · '+mem.length+(mem.length===1?' member':' members'),people:all,lead:true,role:g.role});});
   var rest=ppl.filter(function(p){return !used[p.id];}).sort(byName);
-  if(rest.length)blocks.push({key:'none',name:'Not in any group',sub:rest.length+(rest.length===1?' person':' people'),people:rest,lead:false});
-  if(!blocks.length)return '<div class="empty">No classmates in this zone yet.</div>';
-  return blocks.map(function(b){
+  if(rest.length)blocks.push({key:'none'+(tagZone?'-'+zid:''),name:'Not in any group',sub:(tagZone?zoneName(zid)+' · ':'')+rest.length+(rest.length===1?' person':' people'),people:rest,lead:false});
+  if(!blocks.length&&!solo.length)return '<div class="empty">No classmates in this zone yet.</div>';
+  S._grp=true;var soloHtml=filteredList(solo).map(rowHtml).join('');S._grp=false;
+  return soloHtml+blocks.map(function(b){
     var shown=filteredList(b.people),isOpen=!!open[b.key];
     var c={green:0,amber:0,red:0,no_response:0,none:0};b.people.forEach(function(p){c[p.status]++;});var n=b.people.length||1;
     var head='<button class="mrow" data-act="togglegroup" data-v="'+b.key+'" aria-expanded="'+isOpen+'" style="'+(b.lead?'':'border-color:#E8C77E;background:#FFFBF2')+'">'+
@@ -389,7 +401,7 @@ function groupedHtml(ppl,zid){
       '<div class="bar" style="height:6px;margin-top:6px">'+ORDER.map(function(k){return '<span style="width:'+(c[k]*100/n)+'%;background:'+ST[k].c+'"></span>';}).join('')+'</div></span>'+
       '<span class="right"><span class="mono" style="font-size:12px;color:#374151">'+(S.status==='all'?'':shown.length+' '+ST[S.status].t.toLowerCase())+'</span>'+
       '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B6472" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transform:rotate('+(isOpen?180:0)+'deg)"><polyline points="6 9 12 15 18 9"/></svg></span></button>';
-    var body=isOpen?'<div class="list" style="padding-left:14px;border-left:3px solid '+(b.lead?'var(--tealbg)':'#F1D49A')+';margin-left:18px">'+(shown.length?shown.map(rowHtml).join(''):'<div class="muted" style="padding:8px 4px">No one matches this filter.</div>')+'</div>':'';
+    S._grp=true;var body=isOpen?'<div class="list" style="padding-left:14px;border-left:3px solid '+(b.lead?'var(--tealbg)':'#F1D49A')+';margin-left:18px">'+(shown.length?shown.map(rowHtml).join(''):'<div class="muted" style="padding:8px 4px">No one matches this filter.</div>')+'</div>':'';S._grp=false;
     return '<div class="col" style="gap:8px">'+head+body+'</div>';
   }).join('');
 }
@@ -404,7 +416,7 @@ function filteredList(ppl){
 function rowHtml(p){
     var s=ST[p.status],lg=loginByPerson(p.id);
     var grp=liveGroup(p)?liveGroup(p).split(' ')[0]+"'s group":'';var tag=p.id===S.me.person_id?['You',grp].filter(Boolean).join(' · '):(lg?[ROLE[lg.role],lg.role==='coordinator'||lg.role==='treasurer'?grp:''].filter(Boolean).join(' · '):grp);
-    var sub=[p.city,S.zone==='all'&&isAdmin()&&p.city!==p.zone_name?p.zone_name:'',tag].filter(Boolean).join(' · ');
+    var sub=[p.city,S.zone==='all'&&isAdmin()&&!S._grp&&p.city!==p.zone_name?p.zone_name:'',tag].filter(Boolean).join(' · ');
     var money=(p.paid||p.status==='green')?'Paid '+inr(p.paid):'';
     return '<button class="mrow" data-act="open" data-id="'+p.id+'"><span class="av" style="background:'+s.bg+';color:'+s.fg+'">'+esc(ini(p.name))+'</span>'+
       '<span class="grow"><div class="nm">'+esc(p.name)+'</div><div class="sub">'+esc(sub)+'</div></span>'+
